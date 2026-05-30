@@ -2,6 +2,23 @@
 <a href="https://mini-swe-agent.com/latest/"><img src="https://github.com/SWE-agent/mini-swe-agent/raw/main/docs/assets/mini-swe-agent-banner.svg" alt="mini-swe-agent banner" style="height: 7em"/></a>
 </div>
 
+# Self-Improving Code Agent Fork
+
+This fork adds a lightweight attempt-feedback-revision-memory loop for SWE-bench repair tasks without updating model parameters.
+It stores episodic repair memories, retrieves strategy hints before each task, logs which memories were used, and updates memory Q-values from SWE-bench resolved/unresolved feedback.
+It also includes a hybrid retrieval ablation that mixes same-repository and global high-Q memories.
+
+Key files:
+
+- `src/minisweagent/run/benchmarks/memory.py`: episodic-memory loading, scoring, hybrid retrieval, and prompt formatting.
+- `src/minisweagent/run/benchmarks/swebench.py`: memory injection and retrieval logging in batch SWE-bench runs.
+- `scripts/run_memrl_rounds.py`: multi-round self-improvement loop.
+- `scripts/update_memory_q_values.py`: feedback-based Q-value updates.
+- `scripts/evaluate_swebench_run.py`: local SWE-bench harness wrapper.
+
+Local trajectories, Docker evaluation logs, and generated memory files are intentionally ignored under `runs/` and `logs/`.
+Compact evaluation summaries are kept at the repository root for reference.
+
 # The minimal AI software engineering agent
 
 📣 [Run mini-swe-agent on our new & extremely challenging benchmark, ProgramBench](https://mini-swe-agent.com/latest/usage/programbench/)<br/>

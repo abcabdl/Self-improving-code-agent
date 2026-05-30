@@ -137,6 +137,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-wsl/
 env/
 venv/
 ENV/
@@ -186,3 +187,7 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Local SWE-bench experiment artifacts
+logs/
+runs/
+resource.py

@@ -20,6 +20,7 @@ from minisweagent import Environment
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
+from minisweagent.run.benchmarks.memory import format_memory_block, load_memory, retrieve_memories
 from minisweagent.run.benchmarks.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.benchmarks.utils.common import ProgressTrackingAgent
 from minisweagent.utils.log import add_file_handler, logger
@@ -63,6 +64,7 @@ DATASET_MAPPING = {
 
 app = typer.Typer(rich_markup_mode="rich", add_completion=False)
 _OUTPUT_FILE_LOCK = threading.Lock()
+_MEMORY_LOG_LOCK = threading.Lock()
 
 
 def get_swebench_docker_image_name(instance: dict) -> str:
@@ -119,11 +121,40 @@ def remove_from_preds_file(output_path: Path, instance_id: str):
             output_path.write_text(json.dumps(output_data, indent=2))
 
 
+def append_memory_log(output_path: Path, instance_id: str, retrieved: list[dict]):
+    """Record which memories were retrieved for reward-based Q updates."""
+    if not retrieved:
+        return
+    with _MEMORY_LOG_LOCK:
+        with output_path.open("a", encoding="utf-8", newline="\n") as f:
+            for rank, item in enumerate(retrieved, 1):
+                payload = {
+                    "target_instance_id": instance_id,
+                    "rank": rank,
+                    "memory_instance_id": item.get("instance_id", ""),
+                    "memory_repo": item.get("repo", ""),
+                    "retrieval_score": item.get("retrieval_score", 0),
+                    "similarity_score": item.get("similarity_score", 0),
+                    "q_value": item.get("q_value", 0),
+                    "same_repo": item.get("same_repo", False),
+                    "memory_strategy": item.get("memory_strategy", "score"),
+                    "memory_confidence": item.get("memory_confidence", "normal"),
+                }
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
 def process_instance(
     instance: dict,
     output_dir: Path,
     config: dict,
     progress_manager: RunBatchProgressManager,
+    memories: list[dict] | None = None,
+    memory_k: int = 0,
+    memory_strategy: str = "score",
+    memory_same_repo_k: int = 2,
+    memory_global_k: int = 1,
+    memory_low_confidence_q: float = 0.5,
+    memory_low_confidence_similarity: float = 0.28,
 ) -> None:
     """Process a single SWEBench instance."""
     instance_id = instance["instance_id"]
@@ -133,6 +164,21 @@ def process_instance(
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
     task = instance["problem_statement"]
+    if memories and memory_k > 0:
+        retrieved = retrieve_memories(
+            instance,
+            memories,
+            k=memory_k,
+            strategy=memory_strategy,
+            same_repo_k=memory_same_repo_k,
+            global_k=memory_global_k,
+            low_confidence_q=memory_low_confidence_q,
+            low_confidence_similarity=memory_low_confidence_similarity,
+        )
+        if retrieved:
+            append_memory_log(output_dir / "retrieved_memories.jsonl", instance_id, retrieved)
+            memory_block = format_memory_block(retrieved)
+            task = f"{memory_block}\n\n{task}"
 
     progress_manager.on_instance_start(instance_id)
     progress_manager.update_instance_status(instance_id, "Pulling/starting environment")
@@ -212,6 +258,13 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     config_spec: list[str] = typer.Option([str(DEFAULT_CONFIG_FILE)], "-c", "--config", help=_CONFIG_SPEC_HELP_TEXT, rich_help_panel="Basic"),
     environment_class: str | None = typer.Option(None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
+    memory_file: str = typer.Option("", "--memory-file", help="Path to SWE-bench episodic memory JSON", rich_help_panel="Advanced"),
+    memory_k: int = typer.Option(3, "--memory-k", help="Number of retrieved memories to inject", rich_help_panel="Advanced"),
+    memory_strategy: str = typer.Option("score", "--memory-strategy", help="Memory retrieval strategy: score or hybrid", rich_help_panel="Advanced"),
+    memory_same_repo_k: int = typer.Option(2, "--memory-same-repo-k", help="Hybrid memory: number of same-repo memories to prefer", rich_help_panel="Advanced"),
+    memory_global_k: int = typer.Option(1, "--memory-global-k", help="Hybrid memory: number of high-Q global memories to include", rich_help_panel="Advanced"),
+    memory_low_confidence_q: float = typer.Option(0.5, "--memory-low-confidence-q", help="Hybrid memory: q threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
+    memory_low_confidence_similarity: float = typer.Option(0.28, "--memory-low-confidence-similarity", help="Hybrid memory: similarity threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
 ) -> None:
     # fmt: on
     output_path = Path(output)
@@ -239,6 +292,15 @@ def main(
         "model": {"model_name": model or UNSET, "model_class": model_class or UNSET},
     })
     config = recursive_merge(*configs)
+    memories = None
+    if memory_file:
+        if memory_strategy not in {"score", "hybrid"}:
+            raise typer.BadParameter("--memory-strategy must be either 'score' or 'hybrid'")
+        memories = load_memory(memory_file)
+        logger.info(
+            f"Loaded {len(memories)} repair memories from {memory_file}; "
+            f"retrieving top {memory_k} per instance with strategy={memory_strategy}"
+        )
 
     progress_manager = RunBatchProgressManager(len(instances), output_path / f"exit_statuses_{time.time()}.yaml")
 
@@ -256,9 +318,20 @@ def main(
     with Live(progress_manager.render_group, refresh_per_second=4):
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(process_instance, instance, output_path, config, progress_manager): instance[
-                    "instance_id"
-                ]
+                executor.submit(
+                    process_instance,
+                    instance,
+                    output_path,
+                    config,
+                    progress_manager,
+                    memories,
+                    memory_k,
+                    memory_strategy,
+                    memory_same_repo_k,
+                    memory_global_k,
+                    memory_low_confidence_q,
+                    memory_low_confidence_similarity,
+                ): instance["instance_id"]
                 for instance in instances
             }
             try:
