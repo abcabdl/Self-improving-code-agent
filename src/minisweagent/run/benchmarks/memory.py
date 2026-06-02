@@ -92,6 +92,7 @@ def retrieve_memories(
     strategy: str = "score",
     same_repo_k: int = 2,
     global_k: int = 1,
+    min_global_similarity: float = 0.18,
     low_confidence_q: float = 0.5,
     low_confidence_similarity: float = 0.28,
 ) -> list[dict[str, Any]]:
@@ -147,24 +148,31 @@ def retrieve_memories(
     for item in same_repo[: max(0, same_repo_k)]:
         add_item(item)
 
-    global_ranked = sorted(
-        [item for _, item in scored],
-        key=lambda item: (
-            float(item.get("q_value", 0.0)),
-            float(item.get("similarity_score", 0.0)),
-            float(item.get("retrieval_score", 0.0)),
-        ),
-        reverse=True,
-    )
-    for item in global_ranked:
-        if len(selected) >= min(k, max(0, same_repo_k) + max(0, global_k)):
-            break
-        add_item(item)
+    if global_k > 0:
+        global_ranked = sorted(
+            [
+                item
+                for _, item in scored
+                if item.get("same_repo") or float(item.get("similarity_score", 0.0)) >= min_global_similarity
+            ],
+            key=lambda item: (
+                float(item.get("q_value", 0.0)),
+                float(item.get("similarity_score", 0.0)),
+                float(item.get("retrieval_score", 0.0)),
+            ),
+            reverse=True,
+        )
+        for item in global_ranked:
+            if len(selected) >= min(k, max(0, same_repo_k) + max(0, global_k)):
+                break
+            add_item(item)
 
-    for _, item in scored:
-        if len(selected) >= k:
-            break
-        add_item(item)
+        for _, item in scored:
+            if not item.get("same_repo") and float(item.get("similarity_score", 0.0)) < min_global_similarity:
+                continue
+            if len(selected) >= k:
+                break
+            add_item(item)
 
     max_q = max((float(item.get("q_value", 0.0)) for item in selected), default=0.0)
     max_similarity = max((float(item.get("similarity_score", 0.0)) for item in selected), default=0.0)

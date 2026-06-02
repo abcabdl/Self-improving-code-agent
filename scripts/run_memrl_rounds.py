@@ -49,6 +49,11 @@ def main() -> int:
     parser.add_argument("--config", default="swebench.yaml")
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--memory-k", type=int, default=3)
+    parser.add_argument("--initial-strategy-memory", type=Path, default=None)
+    parser.add_argument("--workflow-k", type=int, default=1)
+    parser.add_argument("--reflection-k", type=int, default=2)
+    parser.add_argument("--strategy-min-score", type=float, default=0.3)
+    parser.add_argument("--no-tool-bandit", action="store_true")
     parser.add_argument("--alpha", type=float, default=0.5)
     parser.add_argument("--eval-timeout", type=int, default=1800)
     parser.add_argument("--eval-max-workers", type=int, default=1)
@@ -73,14 +78,19 @@ def main() -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
 
     current_memory = args.initial_memory
+    current_strategy_memory = args.initial_strategy_memory
     for round_idx in range(1, args.rounds + 1):
         run_dir = out_dir / f"round_{round_idx}_run"
         run_id = f"{args.run_prefix}-r{round_idx}-gpt5mini-eval"
         summary_path = out_dir / f"openai__gpt-5-mini.{run_id}.json"
         next_memory = out_dir / f"memory_r{round_idx}.json"
-        if args.resume and next_memory.exists():
+        next_strategy_memory = out_dir / f"strategy_r{round_idx}.json"
+        strategy_complete = current_strategy_memory is None or next_strategy_memory.exists()
+        if args.resume and next_memory.exists() and strategy_complete:
             print(f"\nRound {round_idx} already has updated memory: {next_memory}")
             current_memory = next_memory
+            if current_strategy_memory is not None:
+                current_strategy_memory = next_strategy_memory
             continue
 
         run_cmd(
@@ -110,6 +120,21 @@ def main() -> int:
                 str(current_memory),
                 "--memory-k",
                 str(args.memory_k),
+                *(
+                    [
+                        "--strategy-memory-file",
+                        str(current_strategy_memory),
+                        "--workflow-k",
+                        str(args.workflow_k),
+                        "--reflection-k",
+                        str(args.reflection_k),
+                        "--strategy-min-score",
+                        str(args.strategy_min_score),
+                        *(["--no-tool-bandit"] if args.no_tool_bandit else []),
+                    ]
+                    if current_strategy_memory is not None
+                    else []
+                ),
                 *(["--redo-existing"] if args.redo_existing else []),
             ],
             cwd=repo_root,
@@ -163,7 +188,33 @@ def main() -> int:
         )
         current_memory = next_memory
 
+        if current_strategy_memory is not None:
+            run_cmd(
+                [
+                    sys.executable,
+                    "scripts/update_strategy_memory.py",
+                    "--strategy",
+                    str(current_strategy_memory),
+                    "--summary",
+                    str(summary_path),
+                    "--run-dir",
+                    str(run_dir),
+                    "--usage-log",
+                    str(run_dir / "strategy_usage.jsonl"),
+                    "--output",
+                    str(next_strategy_memory),
+                    "--alpha",
+                    str(args.alpha),
+                ],
+                cwd=repo_root,
+                env=env,
+                dry_run=args.dry_run,
+            )
+            current_strategy_memory = next_strategy_memory
+
     print(f"\nDone. Final memory: {current_memory}")
+    if current_strategy_memory is not None:
+        print(f"Final strategy memory: {current_strategy_memory}")
     print(f"Output directory: {out_dir}")
     return 0
 

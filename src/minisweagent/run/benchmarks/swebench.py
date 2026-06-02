@@ -21,6 +21,12 @@ from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
 from minisweagent.run.benchmarks.memory import format_memory_block, load_memory, retrieve_memories
+from minisweagent.run.benchmarks.strategy_memory import (
+    format_strategy_block,
+    load_strategy_memory,
+    retrieve_strategy_items,
+    tool_prior,
+)
 from minisweagent.run.benchmarks.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.benchmarks.utils.common import ProgressTrackingAgent
 from minisweagent.utils.log import add_file_handler, logger
@@ -65,6 +71,7 @@ DATASET_MAPPING = {
 app = typer.Typer(rich_markup_mode="rich", add_completion=False)
 _OUTPUT_FILE_LOCK = threading.Lock()
 _MEMORY_LOG_LOCK = threading.Lock()
+_STRATEGY_LOG_LOCK = threading.Lock()
 
 
 def get_swebench_docker_image_name(instance: dict) -> str:
@@ -143,6 +150,26 @@ def append_memory_log(output_path: Path, instance_id: str, retrieved: list[dict]
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def append_strategy_log(
+    output_path: Path,
+    instance: dict,
+    workflows: list[dict],
+    reflections: list[dict],
+    priorities: list[dict],
+) -> None:
+    """Record injected controller state for feedback-based strategy updates."""
+    payload = {
+        "target_instance_id": instance.get("instance_id", ""),
+        "target_repo": instance.get("repo", ""),
+        "workflow_ids": [item.get("workflow_id", "") for item in workflows],
+        "reflection_ids": [item.get("reflection_id", "") for item in reflections],
+        "tool_priorities": priorities,
+    }
+    with _STRATEGY_LOG_LOCK:
+        with output_path.open("a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
 def process_instance(
     instance: dict,
     output_dir: Path,
@@ -153,8 +180,14 @@ def process_instance(
     memory_strategy: str = "score",
     memory_same_repo_k: int = 2,
     memory_global_k: int = 1,
+    memory_global_min_similarity: float = 0.18,
     memory_low_confidence_q: float = 0.5,
     memory_low_confidence_similarity: float = 0.28,
+    strategy_memory: dict | None = None,
+    workflow_k: int = 1,
+    reflection_k: int = 2,
+    tool_bandit: bool = True,
+    strategy_min_score: float = 0.3,
 ) -> None:
     """Process a single SWEBench instance."""
     instance_id = instance["instance_id"]
@@ -164,6 +197,18 @@ def process_instance(
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
     task = instance["problem_statement"]
+    if strategy_memory:
+        workflows = retrieve_strategy_items(
+            instance, strategy_memory.get("workflows", []), k=workflow_k, min_score=strategy_min_score
+        )
+        reflections = retrieve_strategy_items(
+            instance, strategy_memory.get("reflections", []), k=reflection_k, min_score=strategy_min_score
+        )
+        priorities = tool_prior(strategy_memory, instance.get("repo", "")) if tool_bandit else []
+        append_strategy_log(output_dir / "strategy_usage.jsonl", instance, workflows, reflections, priorities)
+        strategy_block = format_strategy_block(workflows, reflections, priorities)
+        if strategy_block:
+            task = f"{strategy_block}\n\n{task}"
     if memories and memory_k > 0:
         retrieved = retrieve_memories(
             instance,
@@ -172,6 +217,7 @@ def process_instance(
             strategy=memory_strategy,
             same_repo_k=memory_same_repo_k,
             global_k=memory_global_k,
+            min_global_similarity=memory_global_min_similarity,
             low_confidence_q=memory_low_confidence_q,
             low_confidence_similarity=memory_low_confidence_similarity,
         )
@@ -263,8 +309,14 @@ def main(
     memory_strategy: str = typer.Option("score", "--memory-strategy", help="Memory retrieval strategy: score or hybrid", rich_help_panel="Advanced"),
     memory_same_repo_k: int = typer.Option(2, "--memory-same-repo-k", help="Hybrid memory: number of same-repo memories to prefer", rich_help_panel="Advanced"),
     memory_global_k: int = typer.Option(1, "--memory-global-k", help="Hybrid memory: number of high-Q global memories to include", rich_help_panel="Advanced"),
+    memory_global_min_similarity: float = typer.Option(0.18, "--memory-global-min-similarity", help="Hybrid memory: minimum similarity required for cross-repo global memories", rich_help_panel="Advanced"),
     memory_low_confidence_q: float = typer.Option(0.5, "--memory-low-confidence-q", help="Hybrid memory: q threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
     memory_low_confidence_similarity: float = typer.Option(0.28, "--memory-low-confidence-similarity", help="Hybrid memory: similarity threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
+    strategy_memory_file: str = typer.Option("", "--strategy-memory-file", help="Path to learned workflow, reflection, and tool-bandit JSON", rich_help_panel="Advanced"),
+    workflow_k: int = typer.Option(1, "--workflow-k", help="Number of learned repair workflows to inject", rich_help_panel="Advanced"),
+    reflection_k: int = typer.Option(2, "--reflection-k", help="Number of learned failure reflections to inject", rich_help_panel="Advanced"),
+    tool_bandit: bool = typer.Option(True, "--tool-bandit/--no-tool-bandit", help="Inject learned tool-use priorities", rich_help_panel="Advanced"),
+    strategy_min_score: float = typer.Option(0.3, "--strategy-min-score", help="Minimum score required to inject a workflow or reflection", rich_help_panel="Advanced"),
 ) -> None:
     # fmt: on
     output_path = Path(output)
@@ -301,6 +353,15 @@ def main(
             f"Loaded {len(memories)} repair memories from {memory_file}; "
             f"retrieving top {memory_k} per instance with strategy={memory_strategy}"
         )
+    strategy_memory = None
+    if strategy_memory_file:
+        strategy_memory = load_strategy_memory(strategy_memory_file)
+        logger.info(
+            f"Loaded external strategy memory from {strategy_memory_file}: "
+            f"{len(strategy_memory.get('workflows', []))} workflows, "
+            f"{len(strategy_memory.get('reflections', []))} reflections, "
+            f"tool_bandit={tool_bandit}"
+        )
 
     progress_manager = RunBatchProgressManager(len(instances), output_path / f"exit_statuses_{time.time()}.yaml")
 
@@ -329,8 +390,14 @@ def main(
                     memory_strategy,
                     memory_same_repo_k,
                     memory_global_k,
+                    memory_global_min_similarity,
                     memory_low_confidence_q,
                     memory_low_confidence_similarity,
+                    strategy_memory,
+                    workflow_k,
+                    reflection_k,
+                    tool_bandit,
+                    strategy_min_score,
                 ): instance["instance_id"]
                 for instance in instances
             }

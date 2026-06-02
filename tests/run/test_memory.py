@@ -1,7 +1,7 @@
 from minisweagent.run.benchmarks.memory import format_memory_block, retrieve_memories
 
 
-def test_hybrid_memory_prefers_same_repo_and_keeps_high_q_global():
+def test_hybrid_memory_filters_unrelated_high_q_global_memory():
     instance = {
         "instance_id": "django__target",
         "repo": "django/django",
@@ -47,10 +47,55 @@ def test_hybrid_memory_prefers_same_repo_and_keeps_high_q_global():
     assert [item["instance_id"] for item in retrieved] == [
         "django__same_high",
         "django__same_second",
+        "django__same_third",
+    ]
+    assert all(item["same_repo"] for item in retrieved)
+    assert all(item["memory_confidence"] == "normal" for item in retrieved)
+
+
+def test_hybrid_memory_keeps_similar_high_q_global_memory():
+    instance = {
+        "instance_id": "django__target",
+        "repo": "django/django",
+        "problem_statement": "Fix form field validation for choices.",
+        "hints_text": "",
+    }
+    memories = [
+        {
+            "instance_id": "django__same_high",
+            "repo": "django/django",
+            "tokens": ["form", "field", "validation"],
+            "q_value": 0.5,
+        },
+        {
+            "instance_id": "django__same_second",
+            "repo": "django/django",
+            "tokens": ["choices", "validation"],
+            "q_value": 0.5,
+        },
+        {
+            "instance_id": "global__high_q",
+            "repo": "other/project",
+            "tokens": ["form", "field", "validation", "choices"],
+            "q_value": 0.95,
+        },
+    ]
+
+    retrieved = retrieve_memories(
+        instance,
+        memories,
+        k=3,
+        strategy="hybrid",
+        same_repo_k=2,
+        global_k=1,
+    )
+
+    assert [item["instance_id"] for item in retrieved] == [
+        "django__same_high",
+        "django__same_second",
         "global__high_q",
     ]
     assert retrieved[-1]["same_repo"] is False
-    assert all(item["memory_confidence"] == "normal" for item in retrieved)
 
 
 def test_low_confidence_hybrid_memory_is_downweighted_in_prompt():
