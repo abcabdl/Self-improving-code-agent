@@ -98,6 +98,63 @@ def test_hybrid_memory_keeps_similar_high_q_global_memory():
     assert retrieved[-1]["same_repo"] is False
 
 
+def test_simple_gate_abstains_from_low_confidence_global_memory():
+    instance = {
+        "instance_id": "target__1",
+        "repo": "repo/a",
+        "problem_statement": "parser crash on edge token",
+        "hints_text": "",
+    }
+    memories = [
+        {
+            "instance_id": "global__weak",
+            "repo": "repo/b",
+            "tokens": ["unrelated"],
+            "q_value": 1.0,
+        },
+        {
+            "instance_id": "global__low_q",
+            "repo": "repo/b",
+            "tokens": ["parser", "crash", "edge", "token"],
+            "q_value": 0.1,
+        },
+    ]
+
+    retrieved = retrieve_memories(
+        instance,
+        memories,
+        k=2,
+        strategy="score",
+        gate_mode="simple",
+        gate_min_similarity=0.18,
+        gate_min_q=0.25,
+    )
+
+    assert retrieved == []
+
+
+def test_simple_gate_keeps_same_repo_low_similarity_memory():
+    instance = {
+        "instance_id": "target__1",
+        "repo": "repo/a",
+        "problem_statement": "parser crash on edge token",
+        "hints_text": "",
+    }
+    memories = [
+        {
+            "instance_id": "same__ok",
+            "repo": "repo/a",
+            "tokens": ["unrelated"],
+            "q_value": 0.3,
+        }
+    ]
+
+    retrieved = retrieve_memories(instance, memories, k=1, strategy="score", gate_mode="simple")
+
+    assert [item["instance_id"] for item in retrieved] == ["same__ok"]
+    assert retrieved[0]["memory_gate"] == "pass"
+
+
 def test_low_confidence_hybrid_memory_is_downweighted_in_prompt():
     instance = {
         "instance_id": "sympy__target",

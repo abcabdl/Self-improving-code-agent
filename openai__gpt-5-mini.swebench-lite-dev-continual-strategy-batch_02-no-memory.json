@@ -1,0 +1,36 @@
+{
+    "total_instances": 5,
+    "submitted_instances": 5,
+    "completed_instances": 4,
+    "resolved_instances": 3,
+    "unresolved_instances": 1,
+    "empty_patch_instances": 1,
+    "error_instances": 0,
+    "completed_ids": [
+        "pvlib__pvlib-python-1707",
+        "pvlib__pvlib-python-1854",
+        "pydicom__pydicom-1256",
+        "pydicom__pydicom-1413"
+    ],
+    "incomplete_ids": [],
+    "empty_patch_ids": [
+        "pydicom__pydicom-1139"
+    ],
+    "submitted_ids": [
+        "pvlib__pvlib-python-1707",
+        "pvlib__pvlib-python-1854",
+        "pydicom__pydicom-1139",
+        "pydicom__pydicom-1256",
+        "pydicom__pydicom-1413"
+    ],
+    "resolved_ids": [
+        "pvlib__pvlib-python-1707",
+        "pvlib__pvlib-python-1854",
+        "pydicom__pydicom-1256"
+    ],
+    "unresolved_ids": [
+        "pydicom__pydicom-1413"
+    ],
+    "error_ids": [],
+    "schema_version": 2
+}

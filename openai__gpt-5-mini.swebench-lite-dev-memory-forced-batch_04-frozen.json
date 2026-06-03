@@ -1,0 +1,36 @@
+{
+    "total_instances": 5,
+    "submitted_instances": 5,
+    "completed_instances": 4,
+    "resolved_instances": 1,
+    "unresolved_instances": 3,
+    "empty_patch_instances": 1,
+    "error_instances": 0,
+    "completed_ids": [
+        "pylint-dev__astroid-1978",
+        "pyvista__pyvista-4315",
+        "sqlfluff__sqlfluff-1517",
+        "sqlfluff__sqlfluff-1625"
+    ],
+    "incomplete_ids": [],
+    "empty_patch_ids": [
+        "pylint-dev__astroid-1866"
+    ],
+    "submitted_ids": [
+        "pylint-dev__astroid-1866",
+        "pylint-dev__astroid-1978",
+        "pyvista__pyvista-4315",
+        "sqlfluff__sqlfluff-1517",
+        "sqlfluff__sqlfluff-1625"
+    ],
+    "resolved_ids": [
+        "pyvista__pyvista-4315"
+    ],
+    "unresolved_ids": [
+        "pylint-dev__astroid-1978",
+        "sqlfluff__sqlfluff-1517",
+        "sqlfluff__sqlfluff-1625"
+    ],
+    "error_ids": [],
+    "schema_version": 2
+}

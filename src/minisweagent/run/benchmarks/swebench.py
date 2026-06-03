@@ -146,6 +146,7 @@ def append_memory_log(output_path: Path, instance_id: str, retrieved: list[dict]
                     "same_repo": item.get("same_repo", False),
                     "memory_strategy": item.get("memory_strategy", "score"),
                     "memory_confidence": item.get("memory_confidence", "normal"),
+                    "memory_gate": item.get("memory_gate", "off"),
                 }
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
@@ -183,6 +184,10 @@ def process_instance(
     memory_global_min_similarity: float = 0.18,
     memory_low_confidence_q: float = 0.5,
     memory_low_confidence_similarity: float = 0.28,
+    memory_gate_mode: str = "off",
+    memory_gate_min_similarity: float = 0.18,
+    memory_gate_min_q: float = 0.25,
+    memory_stage_aware: bool = False,
     strategy_memory: dict | None = None,
     workflow_k: int = 1,
     reflection_k: int = 2,
@@ -220,10 +225,13 @@ def process_instance(
             min_global_similarity=memory_global_min_similarity,
             low_confidence_q=memory_low_confidence_q,
             low_confidence_similarity=memory_low_confidence_similarity,
+            gate_mode=memory_gate_mode,
+            gate_min_similarity=memory_gate_min_similarity,
+            gate_min_q=memory_gate_min_q,
         )
         if retrieved:
             append_memory_log(output_dir / "retrieved_memories.jsonl", instance_id, retrieved)
-            memory_block = format_memory_block(retrieved)
+            memory_block = format_memory_block(retrieved, stage_aware=memory_stage_aware)
             task = f"{memory_block}\n\n{task}"
 
     progress_manager.on_instance_start(instance_id)
@@ -312,6 +320,10 @@ def main(
     memory_global_min_similarity: float = typer.Option(0.18, "--memory-global-min-similarity", help="Hybrid memory: minimum similarity required for cross-repo global memories", rich_help_panel="Advanced"),
     memory_low_confidence_q: float = typer.Option(0.5, "--memory-low-confidence-q", help="Hybrid memory: q threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
     memory_low_confidence_similarity: float = typer.Option(0.28, "--memory-low-confidence-similarity", help="Hybrid memory: similarity threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
+    memory_gate_mode: str = typer.Option("off", "--memory-gate-mode", help="Memory gate mode: off or simple", rich_help_panel="Advanced"),
+    memory_gate_min_similarity: float = typer.Option(0.18, "--memory-gate-min-similarity", help="Simple gate: minimum similarity for cross-repo memories", rich_help_panel="Advanced"),
+    memory_gate_min_q: float = typer.Option(0.25, "--memory-gate-min-q", help="Simple gate: minimum historical utility", rich_help_panel="Advanced"),
+    memory_stage_aware: bool = typer.Option(False, "--memory-stage-aware", help="Format memories as localization, reproduction, and patch-hypothesis hints", rich_help_panel="Advanced"),
     strategy_memory_file: str = typer.Option("", "--strategy-memory-file", help="Path to learned workflow, reflection, and tool-bandit JSON", rich_help_panel="Advanced"),
     workflow_k: int = typer.Option(1, "--workflow-k", help="Number of learned repair workflows to inject", rich_help_panel="Advanced"),
     reflection_k: int = typer.Option(2, "--reflection-k", help="Number of learned failure reflections to inject", rich_help_panel="Advanced"),
@@ -348,6 +360,8 @@ def main(
     if memory_file:
         if memory_strategy not in {"score", "hybrid"}:
             raise typer.BadParameter("--memory-strategy must be either 'score' or 'hybrid'")
+        if memory_gate_mode not in {"off", "simple"}:
+            raise typer.BadParameter("--memory-gate-mode must be either 'off' or 'simple'")
         memories = load_memory(memory_file)
         logger.info(
             f"Loaded {len(memories)} repair memories from {memory_file}; "
@@ -393,6 +407,10 @@ def main(
                     memory_global_min_similarity,
                     memory_low_confidence_q,
                     memory_low_confidence_similarity,
+                    memory_gate_mode,
+                    memory_gate_min_similarity,
+                    memory_gate_min_q,
+                    memory_stage_aware,
                     strategy_memory,
                     workflow_k,
                     reflection_k,

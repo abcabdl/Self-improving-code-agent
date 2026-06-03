@@ -1,0 +1,35 @@
+{
+    "total_instances": 5,
+    "submitted_instances": 5,
+    "completed_instances": 4,
+    "resolved_instances": 4,
+    "unresolved_instances": 0,
+    "empty_patch_instances": 1,
+    "error_instances": 0,
+    "completed_ids": [
+        "marshmallow-code__marshmallow-1343",
+        "pvlib__pvlib-python-1072",
+        "pvlib__pvlib-python-1154",
+        "pvlib__pvlib-python-1606"
+    ],
+    "incomplete_ids": [],
+    "empty_patch_ids": [
+        "marshmallow-code__marshmallow-1359"
+    ],
+    "submitted_ids": [
+        "marshmallow-code__marshmallow-1343",
+        "marshmallow-code__marshmallow-1359",
+        "pvlib__pvlib-python-1072",
+        "pvlib__pvlib-python-1154",
+        "pvlib__pvlib-python-1606"
+    ],
+    "resolved_ids": [
+        "marshmallow-code__marshmallow-1343",
+        "pvlib__pvlib-python-1072",
+        "pvlib__pvlib-python-1154",
+        "pvlib__pvlib-python-1606"
+    ],
+    "unresolved_ids": [],
+    "error_ids": [],
+    "schema_version": 2
+}

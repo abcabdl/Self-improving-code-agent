@@ -1,0 +1,36 @@
+{
+    "total_instances": 5,
+    "submitted_instances": 5,
+    "completed_instances": 4,
+    "resolved_instances": 1,
+    "unresolved_instances": 3,
+    "empty_patch_instances": 0,
+    "error_instances": 1,
+    "completed_ids": [
+        "pydicom__pydicom-1694",
+        "pydicom__pydicom-901",
+        "pylint-dev__astroid-1268",
+        "pylint-dev__astroid-1333"
+    ],
+    "incomplete_ids": [],
+    "empty_patch_ids": [],
+    "submitted_ids": [
+        "pydicom__pydicom-1694",
+        "pydicom__pydicom-901",
+        "pylint-dev__astroid-1196",
+        "pylint-dev__astroid-1268",
+        "pylint-dev__astroid-1333"
+    ],
+    "resolved_ids": [
+        "pydicom__pydicom-1694"
+    ],
+    "unresolved_ids": [
+        "pydicom__pydicom-901",
+        "pylint-dev__astroid-1268",
+        "pylint-dev__astroid-1333"
+    ],
+    "error_ids": [
+        "pylint-dev__astroid-1196"
+    ],
+    "schema_version": 2
+}

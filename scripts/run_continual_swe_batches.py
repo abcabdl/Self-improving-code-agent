@@ -28,6 +28,7 @@ DATASET_MAPPING = {
     "full": "princeton-nlp/SWE-Bench",
     "lite": "princeton-nlp/SWE-Bench_Lite",
     "verified": "princeton-nlp/SWE-Bench_Verified",
+    "_test": "klieret/swe-bench-dummy-test-dataset",
 }
 
 
@@ -94,6 +95,10 @@ def run_swebench(
     memory_global_min_similarity: float,
     memory_low_confidence_q: float,
     memory_low_confidence_similarity: float,
+    memory_gate_mode: str,
+    memory_gate_min_similarity: float,
+    memory_gate_min_q: float,
+    memory_stage_aware: bool,
     strategy_memory_file: Path | None,
     workflow_k: int,
     reflection_k: int,
@@ -144,6 +149,13 @@ def run_swebench(
                 str(memory_low_confidence_q),
                 "--memory-low-confidence-similarity",
                 str(memory_low_confidence_similarity),
+                "--memory-gate-mode",
+                memory_gate_mode,
+                "--memory-gate-min-similarity",
+                str(memory_gate_min_similarity),
+                "--memory-gate-min-q",
+                str(memory_gate_min_q),
+                *(["--memory-stage-aware"] if memory_stage_aware else []),
             ]
             if memory_file is not None and memory_k > 0
             else []
@@ -306,6 +318,11 @@ def main() -> int:
     parser.add_argument("--memory-global-min-similarity", type=float, default=0.18)
     parser.add_argument("--memory-low-confidence-q", type=float, default=0.5)
     parser.add_argument("--memory-low-confidence-similarity", type=float, default=0.28)
+    parser.add_argument("--memory-policy", default="forced", choices=["forced", "gated"], help="Convenience policy: forced injects retrieved memories; gated allows abstention.")
+    parser.add_argument("--memory-gate-mode", default="", choices=["", "off", "simple"])
+    parser.add_argument("--memory-gate-min-similarity", type=float, default=0.18)
+    parser.add_argument("--memory-gate-min-q", type=float, default=0.25)
+    parser.add_argument("--memory-stage-aware", action="store_true")
     parser.add_argument("--workflow-k", type=int, default=1)
     parser.add_argument("--reflection-k", type=int, default=2)
     parser.add_argument("--strategy-min-score", type=float, default=0.3)
@@ -318,6 +335,8 @@ def main() -> int:
     parser.add_argument("--redo-existing", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if not args.memory_gate_mode:
+        args.memory_gate_mode = "simple" if args.memory_policy == "gated" else "off"
 
     repo_root = Path.cwd()
     out_dir = args.out_dir if args.out_dir.is_absolute() else repo_root / args.out_dir
@@ -344,6 +363,11 @@ def main() -> int:
         "initial_memory": rel(args.initial_memory, out_dir),
         "initial_strategy_memory": rel(args.initial_strategy_memory, out_dir) if args.initial_strategy_memory else "",
         "batch_size": args.batch_size,
+        "memory_policy": args.memory_policy,
+        "memory_gate_mode": args.memory_gate_mode,
+        "memory_gate_min_similarity": args.memory_gate_min_similarity,
+        "memory_gate_min_q": args.memory_gate_min_q,
+        "memory_stage_aware": args.memory_stage_aware,
         "batches": [],
     }
 
@@ -379,6 +403,10 @@ def main() -> int:
                 memory_global_min_similarity=args.memory_global_min_similarity,
                 memory_low_confidence_q=args.memory_low_confidence_q,
                 memory_low_confidence_similarity=args.memory_low_confidence_similarity,
+                memory_gate_mode=args.memory_gate_mode,
+                memory_gate_min_similarity=args.memory_gate_min_similarity,
+                memory_gate_min_q=args.memory_gate_min_q,
+                memory_stage_aware=args.memory_stage_aware,
                 strategy_memory_file=None,
                 workflow_k=args.workflow_k,
                 reflection_k=args.reflection_k,
@@ -425,6 +453,10 @@ def main() -> int:
                 memory_global_min_similarity=args.memory_global_min_similarity,
                 memory_low_confidence_q=args.memory_low_confidence_q,
                 memory_low_confidence_similarity=args.memory_low_confidence_similarity,
+                memory_gate_mode=args.memory_gate_mode,
+                memory_gate_min_similarity=args.memory_gate_min_similarity,
+                memory_gate_min_q=args.memory_gate_min_q,
+                memory_stage_aware=args.memory_stage_aware,
                 strategy_memory_file=args.initial_strategy_memory,
                 workflow_k=args.workflow_k,
                 reflection_k=args.reflection_k,
@@ -470,6 +502,10 @@ def main() -> int:
             memory_global_min_similarity=args.memory_global_min_similarity,
             memory_low_confidence_q=args.memory_low_confidence_q,
             memory_low_confidence_similarity=args.memory_low_confidence_similarity,
+            memory_gate_mode=args.memory_gate_mode,
+            memory_gate_min_similarity=args.memory_gate_min_similarity,
+            memory_gate_min_q=args.memory_gate_min_q,
+            memory_stage_aware=args.memory_stage_aware,
             strategy_memory_file=current_strategy,
             workflow_k=args.workflow_k,
             reflection_k=args.reflection_k,

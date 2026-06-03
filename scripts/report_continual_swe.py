@@ -84,8 +84,48 @@ def run_cost(run_dir: Path, instance_ids: set[str]) -> dict[str, float]:
     }
 
 
+def memory_usage(run_dir: Path, instance_ids: set[str]) -> dict[str, float]:
+    path = run_dir / "retrieved_memories.jsonl"
+    used_instances: set[str] = set()
+    gate_counts: Counter[str] = Counter()
+    local = 0
+    global_ = 0
+    rows = 0
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            target = str(payload.get("target_instance_id", ""))
+            if target not in instance_ids:
+                continue
+            rows += 1
+            used_instances.add(target)
+            gate_counts[str(payload.get("memory_gate", "off"))] += 1
+            if payload.get("same_repo", False):
+                local += 1
+            else:
+                global_ += 1
+    total = len(instance_ids)
+    abstained = total - len(used_instances)
+    return {
+        "memory_used_instances": len(used_instances),
+        "memory_abstained_instances": abstained,
+        "memory_abstention_rate": round(abstained / total, 4) if total else 0.0,
+        "memory_rows": rows,
+        "memory_local_rows": local,
+        "memory_global_rows": global_,
+        "memory_gate_pass_rows": gate_counts.get("pass", 0),
+        "memory_gate_off_rows": gate_counts.get("off", 0),
+    }
+
+
 def prefixed_cost(prefix: str, run_dir: Path, instance_ids: set[str]) -> dict[str, float]:
     return {f"{prefix}_{key}": value for key, value in run_cost(run_dir, instance_ids).items()}
+
+
+def prefixed_memory(prefix: str, run_dir: Path, instance_ids: set[str]) -> dict[str, float]:
+    return {f"{prefix}_{key}": value for key, value in memory_usage(run_dir, instance_ids).items()}
 
 
 def transfer_counts(updated: set[str], control: set[str], universe: set[str]) -> dict[str, int]:
@@ -118,6 +158,7 @@ def summarize(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
         no_memory = summary_sets(resolve_path(batch["no_memory_summary"], base) if batch.get("no_memory_summary") else None)
         frozen = summary_sets(resolve_path(batch["frozen_summary"], base) if batch.get("frozen_summary") else None)
         updated_cost = run_cost(updated_run, instance_ids)
+        updated_memory = memory_usage(updated_run, instance_ids)
 
         row: dict[str, Any] = {
             "batch": batch.get("name", f"batch_{len(rows) + 1}"),
@@ -126,6 +167,7 @@ def summarize(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
             "updated_empty": len(updated["empty"] & instance_ids),
             "updated_errors": len(updated["error"] & instance_ids),
             **{f"updated_{key}": value for key, value in updated_cost.items()},
+            **{f"updated_{key}": value for key, value in updated_memory.items()},
         }
         if batch.get("no_memory_summary"):
             row["no_memory_solved"] = len(no_memory["resolved"] & instance_ids)
@@ -137,9 +179,10 @@ def summarize(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
             row.update({f"vs_frozen_{k}": v for k, v in transfer_counts(updated["resolved"], frozen["resolved"], instance_ids).items()})
             if batch.get("frozen_run_dir"):
                 row.update(prefixed_cost("frozen", resolve_path(batch["frozen_run_dir"], base), instance_ids))
+                row.update(prefixed_memory("frozen", resolve_path(batch["frozen_run_dir"], base), instance_ids))
         rows.append(row)
         for key, value in row.items():
-            if isinstance(value, (int, float)) and key != "batch" and "_avg_" not in key:
+            if isinstance(value, (int, float)) and key != "batch" and "_avg_" not in key and not key.endswith("_rate"):
                 aggregate[key] += value
 
     totals = dict(aggregate)
@@ -148,6 +191,12 @@ def summarize(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]
         if trajectories:
             totals[f"{prefix}_avg_tool_calls"] = round(float(totals.get(f"{prefix}_tool_calls", 0)) / trajectories, 3)
             totals[f"{prefix}_avg_test_runs"] = round(float(totals.get(f"{prefix}_test_runs", 0)) / trajectories, 3)
+        instances = float(totals.get("instances", 0) or 0)
+        if instances and f"{prefix}_memory_abstained_instances" in totals:
+            totals[f"{prefix}_memory_abstention_rate"] = round(
+                float(totals.get(f"{prefix}_memory_abstained_instances", 0)) / instances,
+                4,
+            )
     totals["batches"] = len(rows)
     return rows, totals
 

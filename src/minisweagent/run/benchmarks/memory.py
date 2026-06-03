@@ -95,6 +95,9 @@ def retrieve_memories(
     min_global_similarity: float = 0.18,
     low_confidence_q: float = 0.5,
     low_confidence_similarity: float = 0.28,
+    gate_mode: str = "off",
+    gate_min_similarity: float = 0.18,
+    gate_min_q: float = 0.25,
 ) -> list[dict[str, Any]]:
     if not memories or k <= 0:
         return []
@@ -128,9 +131,33 @@ def retrieve_memories(
             enriched["same_repo"] = bool(same_repo)
             scored.append((score, enriched))
     scored.sort(key=lambda x: x[0], reverse=True)
+    if gate_mode not in {"off", "simple"}:
+        raise ValueError(f"Unknown memory gate mode: {gate_mode}")
+
+    def passes_gate(item: dict[str, Any]) -> bool:
+        if gate_mode == "off":
+            item["memory_gate"] = "off"
+            return True
+        q_value = float(item.get("q_value", 0.0))
+        similarity = float(item.get("similarity_score", 0.0))
+        same_repo = bool(item.get("same_repo", False))
+        passed = q_value >= gate_min_q and (same_repo or similarity >= gate_min_similarity)
+        item["memory_gate"] = "pass" if passed else "abstain"
+        item["gate_min_similarity"] = round(gate_min_similarity, 4)
+        item["gate_min_q"] = round(gate_min_q, 4)
+        return passed
 
     if strategy == "score":
-        return [item for _, item in scored[:k]]
+        selected = []
+        for _, item in scored:
+            if passes_gate(item):
+                selected.append(item)
+            if len(selected) >= k:
+                break
+        for item in selected:
+            item["memory_strategy"] = strategy
+            item["memory_confidence"] = "normal"
+        return selected
     if strategy != "hybrid":
         raise ValueError(f"Unknown memory retrieval strategy: {strategy}")
 
@@ -144,7 +171,7 @@ def retrieve_memories(
         selected.append(item)
         selected_ids.add(memory_id)
 
-    same_repo = [item for _, item in scored if item.get("same_repo")]
+    same_repo = [item for _, item in scored if item.get("same_repo") and passes_gate(item)]
     for item in same_repo[: max(0, same_repo_k)]:
         add_item(item)
 
@@ -153,7 +180,8 @@ def retrieve_memories(
             [
                 item
                 for _, item in scored
-                if item.get("same_repo") or float(item.get("similarity_score", 0.0)) >= min_global_similarity
+                if passes_gate(item)
+                and (item.get("same_repo") or float(item.get("similarity_score", 0.0)) >= min_global_similarity)
             ],
             key=lambda item: (
                 float(item.get("q_value", 0.0)),
@@ -168,6 +196,8 @@ def retrieve_memories(
             add_item(item)
 
         for _, item in scored:
+            if not passes_gate(item):
+                continue
             if not item.get("same_repo") and float(item.get("similarity_score", 0.0)) < min_global_similarity:
                 continue
             if len(selected) >= k:
@@ -183,7 +213,7 @@ def retrieve_memories(
     return selected
 
 
-def format_memory_block(memories: list[dict[str, Any]]) -> str:
+def format_memory_block(memories: list[dict[str, Any]], *, stage_aware: bool = False) -> str:
     if not memories:
         return ""
     low_confidence = all(item.get("memory_confidence") == "low" for item in memories)
@@ -209,16 +239,30 @@ def format_memory_block(memories: list[dict[str, Any]]) -> str:
                 (
                     f"<memory id=\"{idx}\" score=\"{item.get('retrieval_score', 0)}\" "
                     f"same_repo=\"{item.get('same_repo', False)}\" "
-                    f"confidence=\"{item.get('memory_confidence', 'normal')}\">"
+                    f"confidence=\"{item.get('memory_confidence', 'normal')}\" "
+                    f"gate=\"{item.get('memory_gate', 'off')}\">"
                 ),
                 f"repo: {item.get('repo', 'unknown')}",
                 f"instance_id: {item.get('instance_id', 'unknown')}",
                 f"q_value: {item.get('q_value', 0)}",
-                f"touched_files: {files}",
-                f"relevant_tests: {tests}",
-                f"strategy: {item.get('patch_summary', '').strip()[:strategy_limit]}",
-                "</memory>",
             ]
         )
+        if stage_aware:
+            chunks.extend(
+                [
+                    f"localization_hint: inspect these files first if relevant: {files}",
+                    f"reproduction_hint: nearby tests or checks used before: {tests}",
+                    f"patch_hypothesis_hint: {item.get('patch_summary', '').strip()[:strategy_limit]}",
+                ]
+            )
+        else:
+            chunks.extend(
+                [
+                    f"touched_files: {files}",
+                    f"relevant_tests: {tests}",
+                    f"strategy: {item.get('patch_summary', '').strip()[:strategy_limit]}",
+                ]
+            )
+        chunks.append("</memory>")
     chunks.append("</retrieved_repair_memories>")
     return "\n".join(chunks)
