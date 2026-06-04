@@ -191,3 +191,4 @@ pyrightconfig.json
 logs/
 runs/
 resource.py
+openai__*.json
