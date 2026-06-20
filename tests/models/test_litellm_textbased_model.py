@@ -10,6 +10,27 @@ from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.litellm_textbased_model import LitellmTextbasedModel
 
 
+def test_textbased_action_strips_repeated_command_label_prefix():
+    model = LitellmTextbasedModel(model_name="gpt-4o", cost_tracking="ignore_errors")
+
+    with patch("litellm.completion") as mock_completion:
+        mock_response = Mock()
+        mock_message = Mock()
+        mock_message.content = "```mswea_bash_command\nmswea_bash_command: pwd\n```"
+        mock_message.model_dump.return_value = {
+            "role": "assistant",
+            "content": "```mswea_bash_command\nmswea_bash_command: pwd\n```",
+        }
+        mock_response.choices = [Mock(message=mock_message)]
+        mock_response.model_dump.return_value = {"test": "response"}
+        mock_completion.return_value = mock_response
+
+        with patch("litellm.cost_calculator.completion_cost", side_effect=ValueError("Model not found")):
+            result = model.query([{"role": "user", "content": "test"}])
+
+    assert result["extra"]["actions"] == [{"command": "pwd"}]
+
+
 def test_authentication_error_enhanced_message():
     """Test that AuthenticationError gets enhanced with config set instruction."""
     model = LitellmTextbasedModel(model_name="gpt-4")

@@ -179,3 +179,135 @@ def test_agent_config_requires_templates():
     # AgentConfig should require all template fields now (Pydantic raises ValidationError)
     with pytest.raises(ValidationError, match="validation error"):
         AgentConfig()
+
+
+def test_swebench_prompt_keeps_action_visible_early():
+    """The local text parser only sees actions after the model finishes."""
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "minisweagent"
+        / "config"
+        / "benchmarks"
+        / "swebench_backticks.yaml"
+    )
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    prompt = config["agent"]["system_template"] + "\n" + config["agent"]["instance_template"]
+    assert "one short sentence" in prompt
+    assert "25 words or fewer" in prompt
+    assert "Put the command block immediately after THOUGHT" in prompt
+    assert "action is visible early" in prompt
+
+
+def test_swebench_prompt_discourages_repeated_failed_searches():
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "minisweagent"
+        / "config"
+        / "benchmarks"
+        / "swebench_backticks.yaml"
+    )
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    prompt = config["agent"]["instance_template"]
+    assert "do not repeat the same command with only a larger context number" in prompt
+    assert "Switch evidence strategies" in prompt
+    assert "sed -n" in prompt
+
+
+def test_swebench_prompt_prefers_current_checkout_reproductions():
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "minisweagent"
+        / "config"
+        / "benchmarks"
+        / "swebench_backticks.yaml"
+    )
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    prompt = config["agent"]["instance_template"]
+    assert "PYTHONPATH=src:." in prompt
+    assert "current checkout" in prompt
+    assert "Do not use `pip install <package-under-repair>`" in prompt
+
+
+def test_swebench_prompt_discourages_truncated_inline_edits():
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "minisweagent"
+        / "config"
+        / "benchmarks"
+        / "swebench_backticks.yaml"
+    )
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    prompt = config["agent"]["instance_template"]
+    assert "Editing Discipline" in prompt
+    assert "closing code fence will not be truncated" in prompt
+    assert "Python exact-replacement script" in prompt
+    assert "instead of emitting a long inline `sed -i` command" in prompt
+
+
+def test_swebench_prompt_commits_to_edit_after_source_context():
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "minisweagent"
+        / "config"
+        / "benchmarks"
+        / "swebench_backticks.yaml"
+    )
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    prompt = config["agent"]["instance_template"]
+    assert "Once you have inspected the relevant source context" in prompt
+    assert "do not keep running read-only source parse or path checks" in prompt
+    assert "one short exact-replacement source edit" in prompt
+    assert "resolved full path" in prompt
+
+
+def test_swebench_prompt_handles_missing_reproduction_artifacts():
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "minisweagent"
+        / "config"
+        / "benchmarks"
+        / "swebench_backticks.yaml"
+    )
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    prompt = config["agent"]["instance_template"]
+    assert "reproduction script or data file is missing" in prompt
+    assert "do not rerun the absent script" in prompt
+    assert "find . -iname '<name-or-pattern>'" in prompt
+    assert "grep -R '<issue-term>' <likely-dir>" in prompt
+
+
+def test_swebench_prompt_requires_source_inspection_before_empty_submit():
+    config_path = (
+        Path(__file__).parent.parent.parent
+        / "src"
+        / "minisweagent"
+        / "config"
+        / "benchmarks"
+        / "swebench_backticks.yaml"
+    )
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    prompt = config["agent"]["instance_template"]
+    assert "issue text names a source file" in prompt
+    assert "inspect that current source location before creating or submitting a patch" in prompt
+    assert "patch.txt` is missing/empty" in prompt
+    assert "Make a real source edit first" in prompt

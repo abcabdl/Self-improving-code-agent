@@ -15,6 +15,15 @@ from minisweagent.run.benchmarks.memory_skills import (
 )
 
 
+def parquet_safe_record(record: dict) -> dict:
+    """Store nested chat payloads as JSON so pyarrow never infers empty structs."""
+    safe = dict(record)
+    for key in ("prompt", "response"):
+        if key in safe and not isinstance(safe[key], str):
+            safe[key] = json.dumps(safe[key], ensure_ascii=False)
+    return safe
+
+
 def _write_jsonl(path: Path, records: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:
@@ -38,6 +47,8 @@ def _write_parquet(path: Path, records: list[dict], *, val_ratio: float, seed: i
     if not train_records and val_records:
         train_records, val_records = val_records, []
 
+    train_records = [parquet_safe_record(record) for record in train_records]
+    val_records = [parquet_safe_record(record) for record in val_records]
     train_path = path / "train.parquet"
     val_path = path / "val.parquet"
     pd.DataFrame(train_records).to_parquet(train_path, index=False)

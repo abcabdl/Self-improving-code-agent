@@ -82,11 +82,26 @@ def patch_harness_newlines() -> None:
         fix_cmd = "apt-get update && apt-get install -y libgl1 libglx-mesa0 libxrender1"
         if install_cmd in eval_script and fix_cmd not in eval_script:
             eval_script = eval_script.replace(install_cmd, fix_cmd + "\\n" + install_cmd)
+    if instance_id.startswith("pydicom__pydicom-"):
+        install_cmd = "python -m pip install -e ."
+        fix_cmd = 'python -m pip install "pytest<8"'
+        if install_cmd in eval_script and fix_cmd not in eval_script:
+            eval_script = eval_script.replace(install_cmd, install_cmd + "\\n" + fix_cmd)
     return eval_script
 
 
 '''
         patched = patched.replace("\nGIT_APPLY_CMDS = [", "\n" + helper + "GIT_APPLY_CMDS = [")
+    elif 'instance_id.startswith("pydicom__pydicom-")' not in patched:
+        patched = patched.replace(
+            '    return eval_script\n\n\nGIT_APPLY_CMDS = [',
+            '    if instance_id.startswith("pydicom__pydicom-"):\n'
+            '        install_cmd = "python -m pip install -e ."\n'
+            '        fix_cmd = \'python -m pip install "pytest<8"\'\n'
+            '        if install_cmd in eval_script and fix_cmd not in eval_script:\n'
+            '            eval_script = eval_script.replace(install_cmd, install_cmd + "\\\\n" + fix_cmd)\n'
+            '    return eval_script\n\n\nGIT_APPLY_CMDS = [',
+        )
     patched = patched.replace(
         'eval_file.write_text(test_spec.eval_script, newline="\\n")',
         'eval_file.write_text(_codex_patch_eval_script(instance_id, test_spec.eval_script), newline="\\n")',

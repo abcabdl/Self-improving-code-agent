@@ -12,9 +12,14 @@ from minisweagent.exceptions import FormatError
 from minisweagent.models.utils.openai_multimodal import expand_multimodal_content
 
 
+def _normalize_text_action(action: str) -> str:
+    """Trim redundant command-label prefixes sometimes emitted inside fenced blocks."""
+    return re.sub(r"^\s*(?:mswea_bash_command|bash|command)\s*:\s*", "", action, count=1).strip()
+
+
 def parse_regex_actions(content: str, *, action_regex: str, format_error_template: str) -> list[dict]:
     """Parse actions from text content using regex. Raises FormatError if not exactly one action."""
-    actions = [a.strip() for a in re.findall(action_regex, content, re.DOTALL)]
+    actions = [_normalize_text_action(a) for a in re.findall(action_regex, content, re.DOTALL)]
     if len(actions) != 1:
         error_msg = f"Expected exactly 1 action, found {len(actions)}."
         raise FormatError(

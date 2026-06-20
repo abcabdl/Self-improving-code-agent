@@ -319,7 +319,7 @@ def main() -> int:
     parser.add_argument("--memory-low-confidence-q", type=float, default=0.5)
     parser.add_argument("--memory-low-confidence-similarity", type=float, default=0.28)
     parser.add_argument("--memory-policy", default="forced", choices=["forced", "gated"], help="Convenience policy: forced injects retrieved memories; gated allows abstention.")
-    parser.add_argument("--memory-gate-mode", default="", choices=["", "off", "simple"])
+    parser.add_argument("--memory-gate-mode", default="", choices=["", "off", "simple", "atom_direct"])
     parser.add_argument("--memory-gate-min-similarity", type=float, default=0.18)
     parser.add_argument("--memory-gate-min-q", type=float, default=0.25)
     parser.add_argument("--memory-stage-aware", action="store_true")

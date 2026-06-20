@@ -11,7 +11,12 @@ from minisweagent.run.benchmarks.agent_rl import compute_agent_reward, extract_m
 
 LOCATE_RE = re.compile(r"\b(rg|grep|find|ls|sed|cat|head|tail|python\s+-c|python3\s+-c)\b", re.IGNORECASE)
 EDIT_RE = re.compile(r"\b(apply_patch|git\s+apply|python\s+- <<|python3\s+- <<|perl\s+-pi|sed\s+-i)\b|>\s*\w|diff --git", re.IGNORECASE)
-TEST_RE = re.compile(r"\b(pytest|tox|unittest|nosetests|python\s+-m\s+pytest|python3\s+-m\s+pytest|npm\s+test|cargo\s+test)\b", re.IGNORECASE)
+TEST_RE = re.compile(
+    r"\b(pytest|tox|unittest|nosetests|python\s+-m\s+pytest|python3\s+-m\s+pytest|npm\s+test|cargo\s+test)\b",
+    re.IGNORECASE,
+)
+PYTHON_CHECK_RE = re.compile(r"\bpython3?\s+-c\b.*\b(assert|import|print|raise|exit|pytest|unittest)\b", re.IGNORECASE)
+SUBMIT_RE = re.compile(r"COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT|cat\s+patch\.txt", re.IGNORECASE)
 
 
 def classify_command(command: str) -> str | None:
@@ -19,7 +24,9 @@ def classify_command(command: str) -> str | None:
     command = command.strip()
     if not command:
         return None
-    if TEST_RE.search(command):
+    if SUBMIT_RE.search(command):
+        return "submit"
+    if TEST_RE.search(command) or PYTHON_CHECK_RE.search(command):
         return "test"
     if EDIT_RE.search(command):
         return "edit"

@@ -83,6 +83,95 @@ def _memory_text(item: dict[str, Any]) -> str:
     return "\n".join(str(p) for p in parts if p)
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return False
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _first_dict(*values: Any) -> dict[str, Any]:
+    for value in values:
+        parsed = _as_dict(value)
+        if parsed:
+            return parsed
+    return {}
+
+
+def memory_atom_direct_route(item: dict[str, Any]) -> str:
+    """Return the conservative atom-direct route for a retrieved memory item.
+
+    This is intentionally deterministic: runtime only treats a memory as
+    packet-worthy when learned/offline evidence atoms say it supports the
+    current task, all protective atoms are false, and there is concrete packet
+    content to pass along.
+    """
+
+    atoms = _first_dict(
+        item.get("evidence_atoms"),
+        item.get("atom_summary"),
+        item.get("memory_reliability_atoms"),
+        item.get("route_atoms"),
+    )
+    if not atoms:
+        return "SELF_HANDLE"
+
+    current_task_support = _as_bool(atoms.get("current_task_support"))
+    protective = any(
+        _as_bool(atoms.get(key))
+        for key in (
+            "reverify_before_use",
+            "recheck_needed",
+            "auxiliary_only",
+            "background_only",
+            "insufficient_for_delegation",
+            "not_enough_for_packet",
+        )
+    )
+    packet_evidence = _as_dict(item.get("packet_evidence"))
+    candidate_signal = _as_dict(item.get("packet_candidate_signal"))
+    packet_paths = (
+        item.get("touched_files")
+        or item.get("candidate_paths")
+        or packet_evidence.get("paths")
+        or packet_evidence.get("current_files")
+        or candidate_signal.get("candidate_paths")
+        or []
+    )
+    packet_symbols = (
+        item.get("touched_functions_classes")
+        or item.get("candidate_symbols")
+        or packet_evidence.get("symbols")
+        or candidate_signal.get("candidate_symbols")
+        or []
+    )
+    packet_tests = (
+        item.get("tests")
+        or item.get("test_nodes")
+        or item.get("candidate_tests")
+        or packet_evidence.get("test_nodes")
+        or candidate_signal.get("candidate_tests")
+        or []
+    )
+    has_packet_anchors = bool(packet_paths or packet_symbols or packet_tests)
+    return "DELEGATE_PACKET" if current_task_support and not protective and has_packet_anchors else "SELF_HANDLE"
+
+
 def retrieve_memories(
     instance: dict[str, Any],
     memories: list[dict[str, Any]],
@@ -131,13 +220,21 @@ def retrieve_memories(
             enriched["same_repo"] = bool(same_repo)
             scored.append((score, enriched))
     scored.sort(key=lambda x: x[0], reverse=True)
-    if gate_mode not in {"off", "simple"}:
+    if gate_mode not in {"off", "simple", "atom_direct"}:
         raise ValueError(f"Unknown memory gate mode: {gate_mode}")
 
     def passes_gate(item: dict[str, Any]) -> bool:
         if gate_mode == "off":
             item["memory_gate"] = "off"
             return True
+        if gate_mode == "atom_direct":
+            route = memory_atom_direct_route(item)
+            item["memory_gate"] = "pass" if route == "DELEGATE_PACKET" else "abstain"
+            item["memory_route"] = route
+            item["memory_gate_reason"] = (
+                "atom_direct_packet_ready" if route == "DELEGATE_PACKET" else "atom_direct_self_handle_or_missing_packet"
+            )
+            return route == "DELEGATE_PACKET"
         q_value = float(item.get("q_value", 0.0))
         similarity = float(item.get("similarity_score", 0.0))
         same_repo = bool(item.get("same_repo", False))
@@ -222,6 +319,11 @@ def format_memory_block(memories: list[dict[str, Any]], *, stage_aware: bool = F
         "The following are retrieved successful repair experiences from related SWE-bench tasks.",
         "Use them as strategic hints for locating files, designing tests, and avoiding common mistakes.",
         "Do not copy code blindly; verify against the current repository and issue.",
+        (
+            "Memory-use protocol: validate that remembered paths and symbols exist, map each useful memory to a "
+            "current-repo invariant, inspect source/control flow before editing, then run a check that would fail if wrong."
+        ),
+        "If the current issue names a specific rule, class, function, or error, follow that current evidence before remembered filenames.",
     ]
     if low_confidence:
         chunks.extend(
@@ -233,7 +335,7 @@ def format_memory_block(memories: list[dict[str, Any]], *, stage_aware: bool = F
     for idx, item in enumerate(memories, 1):
         files = ", ".join(item.get("touched_files", [])[:6]) or "unknown"
         tests = ", ".join(item.get("tests", [])[:4]) or "unknown"
-        strategy_limit = 360 if low_confidence else 1200
+        strategy_limit = 240 if low_confidence else 360
         chunks.extend(
             [
                 (
@@ -250,15 +352,31 @@ def format_memory_block(memories: list[dict[str, Any]], *, stage_aware: bool = F
         if stage_aware:
             chunks.extend(
                 [
-                    f"localization_hint: inspect these files first if relevant: {files}",
-                    f"reproduction_hint: nearby tests or checks used before: {tests}",
-                    f"patch_hypothesis_hint: {item.get('patch_summary', '').strip()[:strategy_limit]}",
+                    (
+                        f"localization_hint: remembered prior files: {files}. "
+                        "Use them only after checking current issue names, symbols, and error text; "
+                        "If any path is absent, migrate the hint by searching current repo symbols, issue terms, "
+                        "and neighboring modules. Also migrate the hint if a remembered path points to a different rule."
+                    ),
+                    (
+                        f"reproduction_hint: nearby tests or checks used before: {tests}. "
+                        "Map these to the current checkout and run a behavior-sensitive check."
+                    ),
+                    (
+                        f"patch_hypothesis_hint: {item.get('patch_summary', '').strip()[:strategy_limit]}. "
+                        "Treat this as a hypothesis, not a patch recipe."
+                    ),
                 ]
             )
         else:
             chunks.extend(
                 [
                     f"touched_files: {files}",
+                    (
+                        "path_migration_hint: verify remembered paths before using them; if they are absent, "
+                        "map the memory to current-code symbols or nearby modules and continue from an existing "
+                        "source file."
+                    ),
                     f"relevant_tests: {tests}",
                     f"strategy: {item.get('patch_summary', '').strip()[:strategy_limit]}",
                 ]

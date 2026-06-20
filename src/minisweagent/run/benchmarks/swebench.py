@@ -176,6 +176,7 @@ def process_instance(
     output_dir: Path,
     config: dict,
     progress_manager: RunBatchProgressManager,
+    task_prefixes: dict[str, str] | None = None,
     memories: list[dict] | None = None,
     memory_k: int = 0,
     memory_strategy: str = "score",
@@ -202,6 +203,10 @@ def process_instance(
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
     task = instance["problem_statement"]
+    if task_prefixes:
+        prefix = str(task_prefixes.get(instance_id, "") or "").strip()
+        if prefix:
+            task = f"{prefix}\n\n{task}"
     if strategy_memory:
         workflows = retrieve_strategy_items(
             instance, strategy_memory.get("workflows", []), k=workflow_k, min_score=strategy_min_score
@@ -320,10 +325,11 @@ def main(
     memory_global_min_similarity: float = typer.Option(0.18, "--memory-global-min-similarity", help="Hybrid memory: minimum similarity required for cross-repo global memories", rich_help_panel="Advanced"),
     memory_low_confidence_q: float = typer.Option(0.5, "--memory-low-confidence-q", help="Hybrid memory: q threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
     memory_low_confidence_similarity: float = typer.Option(0.28, "--memory-low-confidence-similarity", help="Hybrid memory: similarity threshold for low-confidence prompt downweighting", rich_help_panel="Advanced"),
-    memory_gate_mode: str = typer.Option("off", "--memory-gate-mode", help="Memory gate mode: off or simple", rich_help_panel="Advanced"),
+    memory_gate_mode: str = typer.Option("off", "--memory-gate-mode", help="Memory gate mode: off, simple, or atom_direct", rich_help_panel="Advanced"),
     memory_gate_min_similarity: float = typer.Option(0.18, "--memory-gate-min-similarity", help="Simple gate: minimum similarity for cross-repo memories", rich_help_panel="Advanced"),
     memory_gate_min_q: float = typer.Option(0.25, "--memory-gate-min-q", help="Simple gate: minimum historical utility", rich_help_panel="Advanced"),
     memory_stage_aware: bool = typer.Option(False, "--memory-stage-aware", help="Format memories as localization, reproduction, and patch-hypothesis hints", rich_help_panel="Advanced"),
+    task_prefix_file: str = typer.Option("", "--task-prefix-file", help="JSON mapping instance_id to a prompt prefix such as a MemGate packet", rich_help_panel="Advanced"),
     strategy_memory_file: str = typer.Option("", "--strategy-memory-file", help="Path to learned workflow, reflection, and tool-bandit JSON", rich_help_panel="Advanced"),
     workflow_k: int = typer.Option(1, "--workflow-k", help="Number of learned repair workflows to inject", rich_help_panel="Advanced"),
     reflection_k: int = typer.Option(2, "--reflection-k", help="Number of learned failure reflections to inject", rich_help_panel="Advanced"),
@@ -360,13 +366,21 @@ def main(
     if memory_file:
         if memory_strategy not in {"score", "hybrid"}:
             raise typer.BadParameter("--memory-strategy must be either 'score' or 'hybrid'")
-        if memory_gate_mode not in {"off", "simple"}:
-            raise typer.BadParameter("--memory-gate-mode must be either 'off' or 'simple'")
+        if memory_gate_mode not in {"off", "simple", "atom_direct"}:
+            raise typer.BadParameter("--memory-gate-mode must be one of: off, simple, atom_direct")
         memories = load_memory(memory_file)
         logger.info(
             f"Loaded {len(memories)} repair memories from {memory_file}; "
             f"retrieving top {memory_k} per instance with strategy={memory_strategy}"
         )
+    task_prefixes = None
+    if task_prefix_file:
+        prefix_path = Path(task_prefix_file)
+        task_prefixes = json.loads(prefix_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(task_prefixes, dict):
+            raise typer.BadParameter("--task-prefix-file must contain a JSON object mapping instance_id to string")
+        task_prefixes = {str(key): str(value) for key, value in task_prefixes.items() if str(value).strip()}
+        logger.info(f"Loaded task prefixes for {len(task_prefixes)} instances from {task_prefix_file}")
     strategy_memory = None
     if strategy_memory_file:
         strategy_memory = load_strategy_memory(strategy_memory_file)
@@ -399,6 +413,7 @@ def main(
                     output_path,
                     config,
                     progress_manager,
+                    task_prefixes,
                     memories,
                     memory_k,
                     memory_strategy,

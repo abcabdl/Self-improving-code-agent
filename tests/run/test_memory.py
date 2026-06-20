@@ -1,4 +1,4 @@
-from minisweagent.run.benchmarks.memory import format_memory_block, retrieve_memories
+from minisweagent.run.benchmarks.memory import format_memory_block, memory_atom_direct_route, retrieve_memories
 
 
 def test_hybrid_memory_filters_unrelated_high_q_global_memory():
@@ -192,3 +192,94 @@ def test_low_confidence_hybrid_memory_is_downweighted_in_prompt():
     assert all(item["memory_confidence"] == "low" for item in retrieved)
     assert "Confidence note" in block
     assert "A" * 500 not in block
+
+
+def test_memory_block_teaches_path_validation_and_migration():
+    block = format_memory_block(
+        [
+            {
+                "repo": "example/repo",
+                "instance_id": "example__repo-1",
+                "retrieval_score": 0.8,
+                "q_value": 1.0,
+                "same_repo": True,
+                "memory_confidence": "normal",
+                "memory_gate": "off",
+                "touched_files": ["src/old_path.py"],
+                "tests": ["tests/test_old_path.py"],
+                "patch_summary": "Fix the parser by changing the source implementation.",
+            }
+        ]
+    )
+
+    assert "Memory-use protocol" in block
+    assert "validate that remembered paths and symbols exist" in block
+    assert "inspect source/control flow before editing" in block
+    assert "path_migration_hint" in block
+    assert "map the memory to current-code symbols" in block
+
+
+def test_stage_aware_memory_block_includes_path_migration_hint():
+    block = format_memory_block(
+        [
+            {
+                "repo": "example/repo",
+                "instance_id": "example__repo-1",
+                "retrieval_score": 0.8,
+                "q_value": 1.0,
+                "same_repo": True,
+                "memory_confidence": "normal",
+                "memory_gate": "off",
+                "touched_files": ["src/old_path.py"],
+                "tests": ["tests/test_old_path.py"],
+                "patch_summary": "Fix the parser by changing the source implementation.",
+            }
+        ],
+        stage_aware=True,
+    )
+
+    assert "localization_hint" in block
+    assert "If any path is absent, migrate the hint" in block
+
+
+def test_atom_direct_gate_only_keeps_packet_ready_memory():
+    instance = {
+        "instance_id": "target__1",
+        "repo": "repo/a",
+        "problem_statement": "Fix current-task parser behavior.",
+        "hints_text": "",
+    }
+    memories = [
+        {
+            "instance_id": "packet_ready",
+            "repo": "repo/a",
+            "tokens": ["current", "task", "parser"],
+            "q_value": 1.0,
+            "evidence_atoms": {"current_task_support": True},
+            "touched_files": ["src/parser.py"],
+            "tests": ["tests/test_parser.py::test_current"],
+        },
+        {
+            "instance_id": "protective",
+            "repo": "repo/a",
+            "tokens": ["current", "task", "parser"],
+            "q_value": 1.0,
+            "evidence_atoms": {"current_task_support": True, "reverify_before_use": True},
+            "touched_files": ["src/parser.py"],
+        },
+        {
+            "instance_id": "missing_anchors",
+            "repo": "repo/a",
+            "tokens": ["current", "task", "parser"],
+            "q_value": 1.0,
+            "evidence_atoms": {"current_task_support": True},
+        },
+    ]
+
+    retrieved = retrieve_memories(instance, memories, k=3, strategy="score", gate_mode="atom_direct")
+
+    assert [item["instance_id"] for item in retrieved] == ["packet_ready"]
+    assert retrieved[0]["memory_gate"] == "pass"
+    assert retrieved[0]["memory_route"] == "DELEGATE_PACKET"
+    assert memory_atom_direct_route(memories[1]) == "SELF_HANDLE"
+    assert memory_atom_direct_route(memories[2]) == "SELF_HANDLE"

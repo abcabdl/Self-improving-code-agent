@@ -46,8 +46,11 @@ def main() -> int:
     parser.add_argument("--filter", default="", help="Regex filter for selected instances")
     parser.add_argument("--slice", default="", help="Slice passed through to swebench.py")
     parser.add_argument("--model", default="openai/local-7b")
+    parser.add_argument("--model-class", default="", help="Optional mini-swe-agent model class override, e.g. litellm_textbased")
     parser.add_argument("--api-base", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--config", default="swebench.yaml")
+    parser.add_argument("--agent-step-limit", type=int, default=0, help="Optional override for agent.step_limit")
+    parser.add_argument("--max-tokens", type=int, default=0, help="Optional override for model.model_kwargs.max_tokens")
     parser.add_argument("--rollouts-per-instance", type=int, default=4)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--memory-k", type=int, default=3)
@@ -100,6 +103,9 @@ def main() -> int:
             "model.model_kwargs.drop_params=true",
             "-c",
             "model.cost_tracking=ignore_errors",
+            *(["-c", f"model.model_class={args.model_class}"] if args.model_class else []),
+            *(["-c", f"agent.step_limit={args.agent_step_limit}"] if args.agent_step_limit > 0 else []),
+            *(["-c", f"model.model_kwargs.max_tokens={args.max_tokens}"] if args.max_tokens > 0 else []),
             "--memory-file",
             str(args.initial_memory),
             "--memory-k",

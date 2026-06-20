@@ -190,5 +190,14 @@ pyrightconfig.json
 # Local SWE-bench experiment artifacts
 logs/
 runs/
+data/
 resource.py
+progress.md
+todo.md
 openai__*.json
+gpt-*.json
+local-*.json
+oracle-*.json
+*.memory-covered-*.json
+*.matched-main-*.json
+*.fresh-expanded-*.json

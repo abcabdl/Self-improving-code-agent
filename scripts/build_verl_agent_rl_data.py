@@ -11,6 +11,15 @@ from pathlib import Path
 from minisweagent.run.benchmarks.agent_rl import to_verl_record
 
 
+def parquet_safe_record(record: dict) -> dict:
+    """Store nested chat payloads as JSON so pyarrow never infers empty structs."""
+    safe = dict(record)
+    for key in ("prompt", "response"):
+        if key in safe and not isinstance(safe[key], str):
+            safe[key] = json.dumps(safe[key], ensure_ascii=False)
+    return safe
+
+
 def _load_records(path: Path, *, min_reward: float | None, include_failed: bool) -> list[dict]:
     records = []
     with path.open("r", encoding="utf-8-sig") as src:
@@ -53,6 +62,8 @@ def _write_parquet_dir(path: Path, records: list[dict], *, val_ratio: float, see
     if not train_records and val_records:
         train_records, val_records = val_records, []
 
+    train_records = [parquet_safe_record(record) for record in train_records]
+    val_records = [parquet_safe_record(record) for record in val_records]
     train_path = path / "train.parquet"
     val_path = path / "val.parquet"
     pd.DataFrame(train_records).to_parquet(train_path, index=False)

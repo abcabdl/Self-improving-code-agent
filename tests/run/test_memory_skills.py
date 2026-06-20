@@ -5,6 +5,8 @@ def test_classify_command_extracts_locate_edit_and_test_skills():
     assert classify_command("rg 'class Parser' src") == "locate"
     assert classify_command("apply_patch <<'PATCH'\n*** Begin Patch\nPATCH") == "edit"
     assert classify_command("python -m pytest tests/test_parser.py") == "test"
+    assert classify_command("python -c \"import astroid; print(astroid.parse('x=1'))\"") == "test"
+    assert classify_command("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt") == "submit"
     assert classify_command("echo hello") is None
 
 
